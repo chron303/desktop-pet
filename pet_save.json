@@ -1,0 +1,15 @@
+{
+  "name": "kutta",
+  "personality": "hyper",
+  "hunger": 0.530508250333297,
+  "mood": "curious",
+  "xp": 117.03237165616638,
+  "level": 3,
+  "total_tricks": 36,
+  "total_feeds": 11,
+  "interaction_count": 36,
+  "born_ts": 1777286411.793071,
+  "last_seen_ts": 1778612773.4286666,
+  "late_night_sessions": 31225,
+  "fav_app": "python.exe"
+}

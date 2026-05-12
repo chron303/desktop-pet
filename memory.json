@@ -1,0 +1,118 @@
+{
+  "exchanges": [],
+  "facts": {},
+  "app_time": {
+    "chrome": 0.0,
+    "code": 0.0,
+    "python": 0.0,
+    "explorer": 0.0
+  },
+  "peak_hours": [
+    0
+  ],
+  "late_nights": 22,
+  "total_sessions": 16,
+  "emotions": [
+    {
+      "emotion": "curious",
+      "cause": "WOOHOO!!!",
+      "ts": 1777667401.438109
+    },
+    {
+      "emotion": "love",
+      "cause": "I MISSED YOU! \ud83d\ude2d",
+      "ts": 1777722173.9285114
+    },
+    {
+      "emotion": "curious",
+      "cause": "Bug found! \ud83d\udc1b",
+      "ts": 1777722173.9342725
+    },
+    {
+      "emotion": "happy",
+      "cause": "git commit -m 'good boi'",
+      "ts": 1777722173.9343889
+    },
+    {
+      "emotion": "excited",
+      "cause": "*runs in circles*",
+      "ts": 1778435041.170221
+    },
+    {
+      "emotion": "curious",
+      "cause": "Don't forget to save!",
+      "ts": 1778435041.1753597
+    },
+    {
+      "emotion": "happy",
+      "cause": "You've got this! \ud83d\udcaa",
+      "ts": 1778435041.1754148
+    },
+    {
+      "emotion": "excited",
+      "cause": "My power returns. Fear it.",
+      "ts": 1778435090.3298442
+    },
+    {
+      "emotion": "excited",
+      "cause": "ZOOMIES!! \ud83d\udca8",
+      "ts": 1778435142.985067
+    },
+    {
+      "emotion": "curious",
+      "cause": "Bug found! \ud83d\udc1b",
+      "ts": 1778435142.996688
+    },
+    {
+      "emotion": "curious",
+      "cause": "Bug found! \ud83d\udc1b",
+      "ts": 1778435142.9967306
+    },
+    {
+      "emotion": "love",
+      "cause": "I MISSED YOU! \ud83d\ude2d",
+      "ts": 1778588204.6344295
+    },
+    {
+      "emotion": "happy",
+      "cause": "You've got this! \ud83d\udcaa",
+      "ts": 1778588204.6345997
+    },
+    {
+      "emotion": "excited",
+      "cause": "HEY YOU'RE BACK!! \ud83c\udf89",
+      "ts": 1778612298.6667223
+    },
+    {
+      "emotion": "happy",
+      "cause": "git commit -m 'good boi'",
+      "ts": 1778612298.6698298
+    },
+    {
+      "emotion": "curious",
+      "cause": "Bug found! \ud83d\udc1b",
+      "ts": 1778612298.669888
+    },
+    {
+      "emotion": "excited",
+      "cause": "WOOF WOOF WOOF!!!",
+      "ts": 1778612736.9214828
+    },
+    {
+      "emotion": "happy",
+      "cause": "You've got this! \ud83d\udcaa",
+      "ts": 1778612736.9215846
+    },
+    {
+      "emotion": "curious",
+      "cause": "Don't forget to save!",
+      "ts": 1778612736.921622
+    },
+    {
+      "emotion": "excited",
+      "cause": "Ta-daaa! \ud83c\udf89",
+      "ts": 1778612739.712386
+    }
+  ],
+  "topics": []
+}

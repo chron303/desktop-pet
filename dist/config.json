@@ -1,0 +1,17 @@
+{
+  "pet": "dragon",
+  "speed": 1.0,
+  "color": "default",
+  "accessory": null,
+  "last_x": 699,
+  "last_y": 568,
+  "reminder_min": 45,
+  "afk_sleep_sec": 120,
+  "hud_enabled": true,
+  "wake_words": [
+    "hey buddy",
+    "okay dog",
+    "hey dog"
+  ],
+  "follow_speed": 0.15
+}
