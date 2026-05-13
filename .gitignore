@@ -1,0 +1,36 @@
+# ── User data — never commit these ───────────────────────────────────────
+config.json
+pet_save.json
+memory.json
+screen_time.json
+achievements.json
+
+# ── PyInstaller build artifacts ───────────────────────────────────────────
+build/
+dist/
+*.spec
+
+# ── Python cache ──────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+
+# ── Secrets ───────────────────────────────────────────────────────────────
+credentials.json
+token.json
+spotify_token.json
+
+# ── IDE ───────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.suo
+*.user
+
+# ── OS ────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Misc ──────────────────────────────────────────────────────────────────
+check/
+*.log
