@@ -2,6 +2,9 @@
 pet_window.py — Renders PIL pixel-art frames on a transparent Tkinter window.
 Background: #FF00FF (magenta chroma-key) = fully transparent.
 Dog RGBA image is composited onto magenta; only the dog pixels are visible.
+
+Fix: semi-transparent edge pixels are snapped to fully transparent or fully
+opaque to prevent magenta fringing on anti-aliased sprite edges.
 """
 
 import tkinter as tk
@@ -11,7 +14,8 @@ import sys
 if sys.platform == "win32":
     import ctypes, ctypes.wintypes
 
-CHROMA = "#FF00FF"
+CHROMA    = "#FF00FF"
+CHROMA_RGB = (255, 0, 255)   # magenta as RGB tuple
 
 
 class PetWindow:
@@ -47,12 +51,39 @@ class PetWindow:
         except Exception as e:
             print(f"[window] layered: {e}")
 
-    def draw_frame(self, pil_image):
-        """Composite RGBA sprite onto magenta bg, display on canvas."""
+    def draw_frame(self, pil_image: Image.Image):
+        """
+        Composite RGBA sprite onto magenta background.
+
+        Key fix: instead of blending semi-transparent edge pixels into magenta
+        (which creates a visible pink fringe), we threshold the alpha channel:
+          - alpha >= 128  → keep pixel fully opaque
+          - alpha <  128  → replace with pure magenta (will be keyed out)
+
+        This gives crisp edges with zero colour fringing.
+        """
+        # Ensure RGBA
+        if pil_image.mode != "RGBA":
+            pil_image = pil_image.convert("RGBA")
+
+        # Start with a pure magenta background
         bg = Image.new("RGBA", (self.W, self.H), (255, 0, 255, 255))
+
+        # Centre the sprite
         ox = (self.W - pil_image.width)  // 2
         oy = (self.H - pil_image.height) // 2
-        bg.paste(pil_image, (ox, oy), pil_image)
+
+        # Threshold alpha: snap semi-transparent pixels to fully transparent
+        # so they merge cleanly with the magenta key instead of blending
+        r, g, b, a = pil_image.split()
+        # pixels with alpha < 128 become transparent (will show magenta bg)
+        # pixels with alpha >= 128 become fully opaque
+        threshold = a.point(lambda p: 255 if p >= 128 else 0)
+        clean = Image.merge("RGBA", (r, g, b, threshold))
+
+        bg.paste(clean, (ox, oy), threshold)
+
+        # Convert to RGB for Tkinter (magenta bg will be keyed transparent)
         rgb = bg.convert("RGB")
         self._img_ref = ImageTk.PhotoImage(rgb)
         self.canvas.delete("all")
