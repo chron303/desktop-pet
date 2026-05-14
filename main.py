@@ -38,6 +38,7 @@ from screen_time      import ScreenTimeTracker
 from seasonal         import SeasonalManager
 from emotion_engine   import EmotionEngine
 from achievements     import AchievementSystem
+from dream_journal import DreamJournal
 import sprite as dog_sprite
 import dragon_sprite
 import cat_sprite
@@ -178,6 +179,12 @@ class DesktopPet:
         )
         self.achievements.on_pet_named(self.state.name)
 
+        # ── Dream journal ────────────────────────────────────────────────
+        self.dreams = DreamJournal(self.memory)
+
+        # Wire Ollama availability once brain has checked
+        self.window.root.after(4000, self._init_dream_journal)
+
         # ── Clipboard ─────────────────────────────────────────────────────
         self.clipboard = ClipboardWatcher(on_change=self._on_clipboard)
         self.clipboard.start()
@@ -294,6 +301,14 @@ class DesktopPet:
         if voice_enabled:
             if not self.voice.start():
                 print("[pet] Voice disabled.")
+
+
+    def _init_dream_journal(self):
+        """Wire Ollama availability into dream journal after startup check."""
+        self.dreams.set_ollama(
+            self.brain.is_available,
+            self.brain._model,
+        )
 
     # ── Shadow rendering ──────────────────────────────────────────────────
 
@@ -932,15 +947,37 @@ class DesktopPet:
 
             # AFK detection
             idle = get_idle_seconds()
+
             if idle > self._afk_sleep_sec and not self._afk_sleeping:
                 self._afk_sleeping = True
                 self.behavior._set(State.SLEEP)
+                self.dreams.on_sleep()
+
             elif idle < 3 and self._afk_sleeping:
                 self._afk_sleeping = False
                 self.behavior._set(State.IDLE)
                 self.particles.emit_sparkles(4)
-                self.brain.respond_async("user just came back",
-                                         self._on_llm_response, "afk_return")
+
+                self.brain.respond_async(
+                    "user just came back",
+                    self._on_llm_response,
+                    "afk_return"
+                )
+
+                # Show dream on wake if one was generated
+                dream_text = self.dreams.on_wake()
+
+                if dream_text:
+                    self.window.root.after(
+                        2000,
+                        lambda d=dream_text: self._queue(d)
+                    )
+
+            # Dream journal tick — generates dream after 10min sleep
+            self.dreams.tick(
+                self.pet_type,
+                self._afk_sleeping
+            )
 
             # Trick queue
             if self.behavior._queued_trick:
@@ -1020,6 +1057,7 @@ class DesktopPet:
         self.memory.save()
         self.screen_time.save()
         self.achievements.save()
+        self.dreams.save()
         self.achievements.on_session_end(
             self.memory.session_duration_minutes())
         config_manager.save({

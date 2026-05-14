@@ -351,7 +351,9 @@ class SettingsWindow:
     def _open_memory_dashboard(self):
         if not self._mem_dash or not hasattr(self._mem_dash, "_win"):
             self._mem_dash = MemoryDashboard(
-                self._pet.window.root, self._pet.memory)
+                self._pet.window.root,
+                self._pet.memory,
+                self._pet.dreams)   # ← add this
         self._mem_dash.open()
 
     # ── Achievements ──────────────────────────────────────────────────────
