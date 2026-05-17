@@ -7,6 +7,11 @@ Updates:
   • Text command fact extraction — tray dialog learns from typed commands
   • config_manager fix — exe reads/writes config next to .exe
   • Pet type persists across restarts via config.json "pet" key
+  • Dream Journal — pet dreams while sleeping
+  • Evolution System — pet evolves at level 5 and 10
+  • Fix: screen_time.tick() throttled to once per minute
+  • Fix: random.uniform(60,90) was re-rolled every 16ms causing speech spam
+  • Fix: weather reaction cooldown starts at now() not 0
 """
 
 import sys, os, time, random, argparse
@@ -38,7 +43,9 @@ from screen_time      import ScreenTimeTracker
 from seasonal         import SeasonalManager
 from emotion_engine   import EmotionEngine
 from achievements     import AchievementSystem
-from dream_journal import DreamJournal
+from dream_journal    import DreamJournal
+from evolution        import EvolutionSystem
+from evolution_animation import make_evolution_frames
 import sprite as dog_sprite
 import dragon_sprite
 import cat_sprite
@@ -109,14 +116,14 @@ CD_MEET_SPEECH = 180
 CD_WORKSPACE   = 300
 
 EMOTION_ANIM = {
-    "excited":  "happy",
-    "love":     "love",
-    "angry":    "angry",
-    "dizzy":    "dizzy",
-    "surprised":"surprised",
-    "curious":  "curious_right",
-    "sad":      "sleep",
-    "happy":    "happy",
+    "excited":   "happy",
+    "love":      "love",
+    "angry":     "angry",
+    "dizzy":     "dizzy",
+    "surprised": "surprised",
+    "curious":   "curious_right",
+    "sad":       "sleep",
+    "happy":     "happy",
 }
 
 
@@ -164,6 +171,12 @@ class DesktopPet:
         self.brain.set_memory(self.memory)
         self.brain.set_pet_type(pet_type)
 
+        # ── Evolution system — init BEFORE anything calls switch_pet ──────
+        self.evolution      = EvolutionSystem(self.pet_type, self.state.level)
+        self._evo_frames    = []
+        self._evo_frame_idx = 0
+        self._evo_playing   = False
+
         # ── Emotion engine ────────────────────────────────────────────────
         self.emotion = EmotionEngine(
             self.state,
@@ -179,17 +192,15 @@ class DesktopPet:
         )
         self.achievements.on_pet_named(self.state.name)
 
-        # ── Dream journal ────────────────────────────────────────────────
+        # ── Dream journal ─────────────────────────────────────────────────
         self.dreams = DreamJournal(self.memory)
-
-        # Wire Ollama availability once brain has checked
         self.window.root.after(4000, self._init_dream_journal)
 
         # ── Clipboard ─────────────────────────────────────────────────────
         self.clipboard = ClipboardWatcher(on_change=self._on_clipboard)
         self.clipboard.start()
 
-        self._t_weather_react = 0.0
+        self._t_weather_react = time.monotonic()  # start at NOW — prevents instant fire
         self._hover_start     = 0.0
         self._petting_active  = False
 
@@ -214,19 +225,21 @@ class DesktopPet:
         self._frames    = self._ANIMS["idle"]
 
         # ── Cooldowns ─────────────────────────────────────────────────────
-        self._t_app_speech   = 0.0
-        self._t_idle_speech  = 0.0
-        self._t_meet_speech  = 0.0
-        self._t_zzz          = 0.0
-        self._t_save         = 0.0
-        self._t_llm_idle     = 0.0
-        self._t_workspace    = 0.0
-        self._last_app_cat   = "other"
-        self._last_spotify   = False
-        self._last_meeting   = False
-        self._afk_sleeping   = False
-        self._last_unread    = 0
-        self._last_track     = ""
+        self._t_app_speech        = 0.0
+        self._t_idle_speech       = 0.0
+        self._t_meet_speech       = 0.0
+        self._t_zzz               = 0.0
+        self._t_save              = 0.0
+        self._t_llm_idle          = 0.0
+        self._t_llm_idle_interval = random.uniform(60, 90)  # fixed interval, not re-rolled every tick
+        self._t_workspace         = 0.0
+        self._t_screen_time       = 0.0   # throttle screen_time.tick() to once/min
+        self._last_app_cat        = "other"
+        self._last_spotify        = False
+        self._last_meeting        = False
+        self._afk_sleeping        = False
+        self._last_unread         = 0
+        self._last_track          = ""
 
         # ── Position ──────────────────────────────────────────────────────
         sw = self.window.screen_w
@@ -280,13 +293,6 @@ class DesktopPet:
                 self.set_accessory(acc_hint)
                 print(f"[pet] seasonal accessory: {acc_hint}")
 
-        milestones = self.screen_time.tick()
-        for msg in milestones:
-            self.window.root.after(5000, lambda m=msg: (
-                self._queue(m),
-                self.particles.emit_levelup()
-            ))
-
         # ── Drag state ────────────────────────────────────────────────────
         self._drag_ox  = self._drag_oy = 0
         self._dragging = False
@@ -302,9 +308,7 @@ class DesktopPet:
             if not self.voice.start():
                 print("[pet] Voice disabled.")
 
-
     def _init_dream_journal(self):
-        """Wire Ollama availability into dream journal after startup check."""
         self.dreams.set_ollama(
             self.brain.is_available,
             self.brain._model,
@@ -460,16 +464,13 @@ class DesktopPet:
                 self._on_llm_response, "excited")
             return
 
-        # Check if user is telling their own name
-        import re as _re
-        name_match = _re.search(r'my name is (\w+)', text.lower())
+        name_match = re.search(r'my name is (\w+)', text.lower())
         if name_match:
             self.achievements.on_user_name_told()
 
         classified = self.brain.classify_command(text)
         if classified["action"] == "unknown":
             self.memory.add_exchange(text, "")
-            # Track facts learned
             facts_before = len(self.memory._data.get("facts", {}))
             self.memory._extract_facts(text)
             facts_after  = len(self.memory._data.get("facts", {}))
@@ -484,7 +485,6 @@ class DesktopPet:
                 f"just did: {classified['action']} {classified.get('target', '')}",
                 self._on_llm_response, classified["action"])
 
-        # Chat count achievement
         chats = len(self.memory._data.get("exchanges", [])) // 2
         self.achievements.on_chat(chats)
 
@@ -536,6 +536,7 @@ class DesktopPet:
         self._acc_cache  = {}
         self.brain.set_pet_type(pet_type)
         self.emotion.set_personality(self.state.personality, pet_type)
+        self.evolution.set_pet_type(pet_type, self.state.level)
         self.achievements.on_pet_switched(pet_type)
         from voice import PET_WAKE_WORDS
         self.voice.wake_words = [w.lower() for w in
@@ -558,10 +559,9 @@ class DesktopPet:
 
     def open_settings(self):
         from settings_window import SettingsWindow
-        # Always create fresh — ensures latest tabs/changes show up
         if not hasattr(self, "_settings_win") or \
-        not self._settings_win._win or \
-        not self._settings_win._win.winfo_exists():
+           not self._settings_win._win or \
+           not self._settings_win._win.winfo_exists():
             self._settings_win = SettingsWindow(self)
         self._settings_win.open()
 
@@ -592,7 +592,6 @@ class DesktopPet:
             cmd = var.get().strip()
             dlg.destroy()
             if cmd:
-                # Route directly — text commands get full fact extraction + memory
                 self.memory._extract_facts(cmd)
                 self.memory.record_interaction()
                 self._on_voice_command(cmd)
@@ -620,16 +619,17 @@ class DesktopPet:
         facts  = self.memory._data.get("facts", {})
         user   = facts.get("user_name", "")
         ach_st = self.achievements.stats()
+        evo    = self.evolution.current_form
 
         dlg = tk.Toplevel(self.window.root)
         dlg.title("🐾 Pet Status")
-        dlg.geometry("340x440")
+        dlg.geometry("340x460")
         dlg.resizable(False, False)
         dlg.wm_attributes("-topmost", True)
         dlg.configure(bg="#FAFAFA")
 
         lines = [
-            f"🐶  {s.name}  [{s.personality.upper()}]",
+            f"{evo.emoji}  {s.name}  [{s.personality.upper()}]  — {evo.form_name}",
             f"User: {user}" if user else "",
             "",
             f"Level {s.level}   XP [{bar}]  {int(s.xp)}/{xp_needed}",
@@ -649,7 +649,7 @@ class DesktopPet:
             f"Workspace: {ws}",
         ]
         for line in [l for l in lines if l is not None]:
-            bold = line.startswith("🐶")
+            bold = line.startswith(evo.emoji)
             tk.Label(dlg, text=line, bg="#FAFAFA",
                      font=("Segoe UI", 10, "bold" if bold else "normal"),
                      fg="#222233" if bold else "#444455",
@@ -678,16 +678,55 @@ class DesktopPet:
         self.behavior._queued_trick = "love"
         self.brain.respond_async("I was just fed a bone!", self._on_llm_response, "fed")
         self.hud.show_now(int(self.x), int(self.y))
+
         if leveled:
             self.emotion.on_levelup()
             self.achievements.on_level_up(self.state.level)
             self.particles.emit_levelup()
-            self.behavior._queued_trick = "dizzy"
             self.notify.level_up(self.state.level)
-            new = unlocked_accessories(self.state.level)
-            if new:
-                self._queue(f"Level {self.state.level}! "
-                            f"{new[-1].replace('_', ' ').title()} unlocked! 🎉")
+
+            new_form = self.evolution.check_evolution(self.state.level)
+            if new_form:
+                sprites = self.evolution.load_form_sprites(new_form)
+                if sprites:
+                    new_anims, new_tricks, new_icon_fn = sprites
+                    old_frame = self._get_frame()
+                    tmp_anim  = new_anims.get("idle", [None])[0]
+                    if tmp_anim:
+                        self._evo_frames    = make_evolution_frames(
+                            old_frame, tmp_anim, self.pet_type)
+                        self._evo_frame_idx = 0
+                        self._evo_playing   = True
+
+                    def _apply_evolution(anims=new_anims, tricks=new_tricks,
+                                         icon_fn=new_icon_fn, form=new_form):
+                        self._ANIMS      = anims
+                        self._TRICKS     = tricks
+                        self._TRICK_POOL = tricks
+                        self._icon_fn    = icon_fn
+                        self._acc_cache  = {}
+                        self._set_anim("idle")
+                        msg = self.evolution.get_evolution_message()
+                        self._queue(msg)
+                        self.particles.emit_levelup()
+                        try:
+                            self._tray._icon.icon = icon_fn(32)
+                        except Exception:
+                            pass
+                        print(f"[evolution] Now: {form.form_name} {form.emoji}")
+
+                    delay_ms = len(self._evo_frames) * 16 + 500
+                    self.window.root.after(delay_ms, _apply_evolution)
+                    self._queue(f"✨ Evolving into {new_form.form_name}!")
+                else:
+                    self._queue(f"Level {self.state.level}! Still growing... 🌟")
+            else:
+                new = unlocked_accessories(self.state.level)
+                if new:
+                    self._queue(f"Level {self.state.level}! "
+                                f"{new[-1].replace('_', ' ').title()} unlocked! 🎉")
+                else:
+                    self._queue(f"Level {self.state.level}! Getting stronger! 💪")
 
     # ── Animation ─────────────────────────────────────────────────────────
 
@@ -838,13 +877,17 @@ class DesktopPet:
                 self.notify.meeting(ev["title"], ev["mins_away"])
             self._t_workspace = now
 
-        if state == State.IDLE and now - self._t_llm_idle > random.uniform(60, 90):
+        # ── Idle LLM quip — interval decided ONCE, not re-rolled every tick ──
+        if state == State.IDLE and now - self._t_llm_idle > self._t_llm_idle_interval:
             if random.random() < 0.4:
                 c = ctx.category if ctx.category != "other" else "idle"
                 self.brain.respond_async("just checking in",
                                          self._on_llm_response, c)
-                self._t_llm_idle = now
+            # Always reset timer and pick new interval regardless of random result
+            self._t_llm_idle          = now
+            self._t_llm_idle_interval = random.uniform(60, 90)
 
+        # ── Weather reaction — starts at now() so no instant fire on startup ──
         if self.weather.is_available:
             if self.weather.changed and now - self._t_weather_react > 300:
                 self._queue(self.weather.get_reaction())
@@ -875,15 +918,14 @@ class DesktopPet:
     # ── Achievement notification pump ─────────────────────────────────────
 
     def _pump_achievements(self):
-        """Check for newly unlocked achievements and notify user."""
         from achievements import ACHIEVEMENT_MAP
         for aid in self.achievements.pop_pending():
             if aid not in ACHIEVEMENT_MAP:
                 continue
-            ach  = ACHIEVEMENT_MAP[aid]
-            tier = ach[1]
-            name = ach[4]
-            emoji= ach[3]
+            ach   = ACHIEVEMENT_MAP[aid]
+            tier  = ach[1]
+            name  = ach[4]
+            emoji = ach[3]
             self._queue(f"{emoji} Achievement: {name}!")
             self.particles.emit_levelup()
             print(f"[achievement] 🏆 {name} ({tier.upper()})")
@@ -898,11 +940,15 @@ class DesktopPet:
             cy_pet = int(self.y) + PET_H // 2
 
             self.state.tick()
-            milestones = self.screen_time.tick()
-            for msg in milestones:
-                self._queue(msg)
-                self.particles.emit_levelup()
-                self.notify.level_up(self.screen_time.streak)
+
+            # screen_time.tick() throttled to once per minute
+            if now - self._t_screen_time >= 60.0:
+                milestones = self.screen_time.tick()
+                for msg in milestones:
+                    self._queue(msg)
+                    self.particles.emit_levelup()
+                    self.notify.level_up(self.screen_time.streak)
+                self._t_screen_time = now
 
             if now - self._t_save > SAVE_INTERVAL:
                 self.state.save()
@@ -921,17 +967,17 @@ class DesktopPet:
             self.state.record_app(ctx.foreground_exe)
             self.memory.record_app_time(ctx.foreground_exe, 0.016)
 
-            # ── Emotion engine tick ───────────────────────────────────────
+            # Emotion engine tick
             mood, intensity = self.emotion.tick(
                 app_category    = ctx.category,
                 spotify_playing = ctx.spotify_playing,
             )
-            self.state._data["mood"] = mood      # ← correct: write to internal dict
+            self.state._data["mood"] = mood
 
             if self._afk_sleeping:
                 self.emotion.on_ignored(get_idle_seconds())
 
-            # ── Petting detection ─────────────────────────────────────────
+            # Petting detection
             cursor_dist = ((cursor[0] - cx_pet)**2 + (cursor[1] - cy_pet)**2) ** 0.5
             if cursor_dist < 40 and not self._dragging:
                 if self._hover_start == 0.0:
@@ -947,37 +993,23 @@ class DesktopPet:
 
             # AFK detection
             idle = get_idle_seconds()
-
             if idle > self._afk_sleep_sec and not self._afk_sleeping:
                 self._afk_sleeping = True
                 self.behavior._set(State.SLEEP)
                 self.dreams.on_sleep()
-
             elif idle < 3 and self._afk_sleeping:
                 self._afk_sleeping = False
                 self.behavior._set(State.IDLE)
                 self.particles.emit_sparkles(4)
-
-                self.brain.respond_async(
-                    "user just came back",
-                    self._on_llm_response,
-                    "afk_return"
-                )
-
-                # Show dream on wake if one was generated
+                self.brain.respond_async("user just came back",
+                                         self._on_llm_response, "afk_return")
                 dream_text = self.dreams.on_wake()
-
                 if dream_text:
-                    self.window.root.after(
-                        2000,
-                        lambda d=dream_text: self._queue(d)
-                    )
+                    self.window.root.after(2000,
+                        lambda d=dream_text: self._queue(d))
 
-            # Dream journal tick — generates dream after 10min sleep
-            self.dreams.tick(
-                self.pet_type,
-                self._afk_sleeping
-            )
+            # Dream journal tick
+            self.dreams.tick(self.pet_type, self._afk_sleeping)
 
             # Trick queue
             if self.behavior._queued_trick:
@@ -1032,14 +1064,25 @@ class DesktopPet:
                                              self._on_llm_response, "spotify")
 
             self._handle_speech(state, ctx)
-            self._pump_achievements()      # ← check + notify new achievements
+            self._pump_achievements()
 
             if self._queued_speech:
                 self.speech.say(self._queued_speech, int(self.x), int(self.y))
                 self._queued_speech = None
 
-            self._tick_anim()
-            self.window.draw_frame(self._get_frame())
+            # Evolution animation override
+            if self._evo_playing and self._evo_frames:
+                evo_frame = self._evo_frames[self._evo_frame_idx]
+                self._evo_frame_idx += 1
+                if self._evo_frame_idx >= len(self._evo_frames):
+                    self._evo_playing   = False
+                    self._evo_frames    = []
+                    self._evo_frame_idx = 0
+                self.window.draw_frame(evo_frame)
+            else:
+                self._tick_anim()
+                self.window.draw_frame(self._get_frame())
+
             self.particles.update_and_draw(int(self.x), int(self.y))
             self._update_pos(state, cursor)
 
@@ -1052,14 +1095,13 @@ class DesktopPet:
         tick()
         self.window.root.mainloop()
 
-        # ── Shutdown ──────────────────────────────────────────────────────
+        # Shutdown
         self.state.save()
         self.memory.save()
         self.screen_time.save()
         self.achievements.save()
         self.dreams.save()
-        self.achievements.on_session_end(
-            self.memory.session_duration_minutes())
+        self.achievements.on_session_end(self.memory.session_duration_minutes())
         config_manager.save({
             "pet":           self.pet_type,
             "speed":         self.anim_speed,
