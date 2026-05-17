@@ -45,6 +45,7 @@ from emotion_engine   import EmotionEngine
 from achievements     import AchievementSystem
 from dream_journal    import DreamJournal
 from evolution        import EvolutionSystem
+from startup_chooser  import show_chooser
 from evolution_animation import make_evolution_frames
 import sprite as dog_sprite
 import dragon_sprite
@@ -1123,22 +1124,49 @@ class DesktopPet:
 
 def main():
     p = argparse.ArgumentParser(description="Desktop Pet v9")
-    p.add_argument("--speed",    default=1.0,  type=float)
-    p.add_argument("--reminder", default=45,   type=int)
-    p.add_argument("--no-voice", action="store_true")
-    p.add_argument("--pet",      default="dog",
-                   choices=["dog", "dragon", "cat"])
+    p.add_argument("--speed",     default=1.0,   type=float)
+    p.add_argument("--reminder",  default=45,    type=int)
+    p.add_argument("--no-voice",  action="store_true")
+    p.add_argument("--pet",       default=None,
+                   choices=["dog", "dragon", "cat"],
+                   help="Skip chooser and launch with this pet")
+    p.add_argument("--no-chooser", action="store_true",
+                   help="Skip the pet chooser dialog")
     args = p.parse_args()
-
-    saved_pet = config_manager.load().get("pet", args.pet)
-
+ 
+    # Load saved pet from config
+    saved_pet = config_manager.load().get("pet", "dog")
+ 
+    # Determine whether to show chooser
+    if args.pet:
+        # --pet flag passed directly — skip chooser
+        chosen_pet = args.pet
+    elif args.no_chooser:
+        # --no-chooser flag — use saved pet silently
+        chosen_pet = saved_pet
+    else:
+        # Show the chooser dialog — this is the default
+        # Pass current saved_pet so it pre-selects the right card
+        chosen_pet = show_chooser(current_pet=saved_pet)
+        if chosen_pet is None:
+            # User closed the window — exit gracefully
+            print("[pet] No pet chosen. Goodbye!")
+            return
+ 
+    # Persist the chosen pet immediately
+    cfg = config_manager.load()
+    cfg["pet"] = chosen_pet
+    config_manager.save(cfg)
+ 
+    print(f"[pet] Starting with: {chosen_pet}")
+ 
     DesktopPet(
         speed         = args.speed,
         reminder_min  = args.reminder,
         voice_enabled = not args.no_voice,
-        pet_type      = saved_pet,
+        pet_type      = chosen_pet,
     ).run()
-
-
+ 
+ 
 if __name__ == "__main__":
     main()
